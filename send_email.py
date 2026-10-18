@@ -211,26 +211,39 @@ def send_invitation_email(recipient_email, sender_email, sender_password, smtp_s
     msg.attach(part1)
     msg.attach(part2)
 
-    print(f"[*] Menghubungkan ke server SMTP {smtp_server}:{smtp_port}...")
-    try:
-        if smtp_port == 465:
-            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15)
-        else:
-            server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
-            server.starttls()
+    clean_password = sender_password.replace(" ", "").strip()
 
-        print("[*] Melakukan login autentikasi...")
-        server.login(sender_email, sender_password)
+    # Coba port 587 (STARTTLS) terlebih dahulu atau port 465 (SSL)
+    ports_to_try = [587, 465]
+    success = False
+    last_error = None
 
-        print(f"[*] Mengirimkan email undangan ke: {recipient_email}...")
-        server.sendmail(sender_email, [recipient_email], msg.as_string())
-        server.quit()
+    for port in ports_to_try:
+        try:
+            print(f"[*] Menghubungkan ke server SMTP {smtp_server}:{port}...")
+            if port == 465:
+                server = smtplib.SMTP_SSL(smtp_server, port, timeout=20)
+            else:
+                server = smtplib.SMTP(smtp_server, port, timeout=20)
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
 
-        print("[+] SUKSES: Email undangan berhasil terkirim!")
-        return True
-    except Exception as e:
-        print(f"[-] GAGAL: Terjadi kesalahan saat mengirim email: {e}")
-        return False
+            print(f"[*] Melakukan login autentikasi ({sender_email})...")
+            server.login(sender_email, clean_password)
+
+            print(f"[*] Mengirimkan email undangan ke: {recipient_email}...")
+            server.sendmail(sender_email, [recipient_email], msg.as_string())
+            server.quit()
+
+            print("[+] SUKSES: Email undangan berhasil terkirim ke " + recipient_email + "!")
+            return True
+        except Exception as e:
+            last_error = e
+            print(f"[-] Port {port} gagal: {e}. Mencoba port alternatif...")
+
+    print(f"[-] GAGAL: Terjadi kesalahan saat mengirim email: {last_error}")
+    return False
 
 def save_html_preview():
     """
