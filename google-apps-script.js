@@ -4,56 +4,47 @@
  * Proyek: UTS Keamanan Jaringan dan Komputer
  * =========================================================================
  * 
- * PETUNJUK PEMASANGAN DI GOOGLE SHEETS:
- * 1. Buat Google Spreadsheet baru di https://sheets.new
- * 2. Beri nama spreadsheet, misalnya: "Log Interaksi Demo UTS"
- * 3. Pada baris 1 (Header Sheet), buat 5 kolom:
- *    - Kolom A: Session ID
- *    - Kolom B: Waktu Interaksi
- *    - Kolom C: Jenis Interaksi
- *    - Kolom D: Status
- *    - Kolom E: Kategori Perangkat
- * 4. Buka menu: Ekstensi (Extensions) > Apps Script
- * 5. Hapus kode default, lalu salin dan tempel (paste) seluruh isi file ini.
- * 6. Klik tombol "Deploy" (Terapkan) di kanan atas > "New deployment" (Penerapan baru).
- * 7. Pilih tipe: "Web app" (Aplikasi web).
- * 8. Konfigurasi:
- *    - Description: "Web App Tracker UTS Demo"
- *    - Execute as: "Me" (Saya / akun Google Anda)
- *    - Who has access: "Anyone" (Siapa saja - PENTING agar dapat menerima request dari Vercel/Next.js)
- * 9. Klik "Deploy", berikan izin akses (Authorize access), lalu salin "Web App URL"
- *    (Format: https://script.google.com/macros/s/AKfycb.../exec)
- * 10. Masukkan URL tersebut ke file .env.local atau Environment Variables Vercel sebagai GOOGLE_SCRIPT_URL.
+ * Update Penting:
+ * Mendukung POST dan GET (fallback) secara otomatis agar data tetap masuk
+ * meskipun terjadi pengalihan 302 dari Google.
  */
 
-function doPost(e) {
+function handleRequest(e) {
   var lock = LockService.getScriptLock();
-  lock.tryLock(10000); // Kunci selama maksimal 10 detik untuk menghindari konflik baris
+  // Tunggu hingga 15 detik agar tidak bentrok antar pencatatan
+  lock.tryLock(15000);
 
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
     
-    // Pastikan header ada jika sheet masih kosong
+    // Pastikan header ada di baris 1 jika sheet masih kosong
     if (sheet.getLastRow() === 0) {
       sheet.appendRow(["Session ID", "Waktu Interaksi", "Jenis Interaksi", "Status", "Kategori Perangkat"]);
-      sheet.getRange(1, 1, 1, 5).setFontWeight("bold").setBackground("#0f172a").setFontColor("#38bdf8");
+      sheet.getRange(1, 1, 1, 5)
+        .setFontWeight("bold")
+        .setBackground("#0f172a")
+        .setFontColor("#38bdf8");
     }
 
     var data = {};
-    if (e.postData && e.postData.contents) {
+
+    // 1. Coba baca dari POST body (JSON)
+    if (e && e.postData && e.postData.contents) {
       try {
         data = JSON.parse(e.postData.contents);
-      } catch (parseErr) {
-        data = e.parameter;
+      } catch (err) {
+        // Jika bukan JSON murni, gunakan parameter
+        data = e.parameter || {};
       }
-    } else if (e.parameter) {
+    } 
+    // 2. Fallback baca dari query parameter (GET / URL encoded)
+    else if (e && e.parameter) {
       data = e.parameter;
     }
 
-    // Ambil data non-sensitif
-    var sessionId = data.sessionId || "SES-UNKNOWN";
-    var timestamp = data.timestamp || new Date().toISOString();
-    var interactionType = data.interactionType || "LOGIN_BUTTON_CLICK";
+    var sessionId = data.sessionId || "SES-SIMULASI";
+    var timestamp = data.timestamp || new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+    var interactionType = data.interactionType || "LOGIN_BUTTON_CLICKED";
     var status = data.status || "SUCCESS";
     var deviceInfo = data.deviceInfo || "Desktop Browser";
 
@@ -65,7 +56,7 @@ function doPost(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Catat ke Google Sheets
+    // Tulis baris baru ke Google Sheets
     sheet.appendRow([sessionId, timestamp, interactionType, status, deviceInfo]);
 
     return ContentService.createTextOutput(JSON.stringify({
@@ -85,9 +76,19 @@ function doPost(e) {
   }
 }
 
+// Menangani permintaan POST dari server
+function doPost(e) {
+  return handleRequest(e);
+}
+
+// Menangani permintaan GET (jika dialihkan atau dipanggil via GET)
 function doGet(e) {
+  if (e && e.parameter && (e.parameter.sessionId || e.parameter.interactionType)) {
+    return handleRequest(e);
+  }
+
   return ContentService.createTextOutput(JSON.stringify({
     status: "active",
-    message: "Google Apps Script Tracker UTS Demo berjalan normal."
+    message: "Google Apps Script Tracker UTS Demo berjalan normal dan siap menerima log."
   })).setMimeType(ContentService.MimeType.JSON);
 }
